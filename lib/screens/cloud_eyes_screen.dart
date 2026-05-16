@@ -1,12 +1,13 @@
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import '../ble_service.dart';
 import '../cloud_eyes.dart';
 import '../image_pipeline.dart';
+import '../slot_metadata.dart';
 
 class CloudEyesScreen extends StatefulWidget {
   final EyeBle ble;
-  const CloudEyesScreen({super.key, required this.ble});
+  final Future<void> Function()? onSlotMetaChanged;
+  const CloudEyesScreen({super.key, required this.ble, this.onSlotMetaChanged});
   @override
   State<CloudEyesScreen> createState() => _CloudEyesScreenState();
 }
@@ -17,11 +18,11 @@ class _CloudEyesScreenState extends State<CloudEyesScreen> {
   String? _error;
   bool _loading = false;
 
-  // Upload-Status
-  bool   _uploading = false;
-  int    _uploadDone = 0;
-  int    _uploadTotal = 0;
-  String _uploadName = '';
+  // Download-Status
+  bool   _downloading = false;
+  int    _downloadDone = 0;
+  int    _downloadTotal = 0;
+  String _downloadName = '';
 
   @override
   void initState() {
@@ -41,56 +42,57 @@ class _CloudEyesScreenState extends State<CloudEyesScreen> {
     }
   }
 
-  Future<void> _uploadToSlot(CloudEye eye, int slot) async {
-    if (_uploading) return;
+  Future<void> _downloadToSlot(CloudEye eye, int slot) async {
+    if (_downloading) return;
     setState(() {
-      _uploading = true;
-      _uploadDone = 0;
-      _uploadTotal = 0;
-      _uploadName = '${eye.name} -> Slot ${slot + 1}';
+      _downloading = true;
+      _downloadDone = 0;
+      _downloadTotal = 0;
+      _downloadName = '${eye.name} -> Slot ${slot + 1}';
     });
     try {
       final pngBytes = await _api.download(eye);
       final rgb565 = pngToRgb565(pngBytes);
       await widget.ble.uploadEye(slot, rgb565, onProgress: (sent, total) {
         if (!mounted) return;
-        setState(() { _uploadDone = sent; _uploadTotal = total; });
+        setState(() { _downloadDone = sent; _downloadTotal = total; });
       });
+      // Slot-Metadata persistieren
+      await SlotMetadataStore.set(widget.ble.pairId, slot, eye.name, eye.downloadUrl);
+      await widget.onSlotMetaChanged?.call();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('"${eye.name}" auf Slot ${slot + 1} hochgeladen.\n'
+          content: Text('"${eye.name}" auf Slot ${slot + 1} geladen.\n'
               'App trennt sich kurz, damit Master ungestoert an Slave senden kann.'),
           duration: const Duration(seconds: 4),
         ),
       );
-      // Kurz warten damit Master den COMMIT verarbeitet, dann disconnect.
-      // Das beendet die BLE-Coex-Stoerung -> Master kann sauber an Slave forwarden.
       await Future.delayed(const Duration(milliseconds: 700));
       try { await widget.ble.disconnect(); } catch (_) {}
       if (!mounted) return;
-      Navigator.of(context).popUntil((r) => r.isFirst);  // zurueck zur Discovery
+      Navigator.of(context).popUntil((r) => r.isFirst);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Upload-Fehler: $e')),
+        SnackBar(content: Text('Download-Fehler: $e')),
       );
     } finally {
-      if (mounted) setState(() { _uploading = false; });
+      if (mounted) setState(() { _downloading = false; });
     }
   }
 
-  Future<void> _pickSlotAndUpload(CloudEye eye) async {
+  Future<void> _pickSlotAndDownload(CloudEye eye) async {
     final slot = await showDialog<int>(
       context: context,
       builder: (ctx) => SimpleDialog(
-        title: Text('"${eye.name}" auf welchen Slot?'),
+        title: Text('"${eye.name}" auf welchen Slot herunterladen?'),
         children: [
           for (int s = 0; s < kCloudSlotCount; s++)
             SimpleDialogOption(
               onPressed: () => Navigator.pop(ctx, s),
               child: Row(children: [
-                const Icon(Icons.cloud_upload),
+                const Icon(Icons.cloud_download),
                 const SizedBox(width: 8),
                 Text('Slot ${s + 1}'),
               ]),
@@ -98,14 +100,14 @@ class _CloudEyesScreenState extends State<CloudEyesScreen> {
         ],
       ),
     );
-    if (slot != null) await _uploadToSlot(eye, slot);
+    if (slot != null) await _downloadToSlot(eye, slot);
   }
 
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
-        if (_uploading)
+        if (_downloading)
           Padding(
             padding: const EdgeInsets.all(12),
             child: Card(
@@ -115,14 +117,14 @@ class _CloudEyesScreenState extends State<CloudEyesScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Upload: $_uploadName',
+                    Text('Lade auf Augen: $_downloadName',
                         style: const TextStyle(fontWeight: FontWeight.bold)),
                     const SizedBox(height: 6),
                     LinearProgressIndicator(
-                      value: _uploadTotal > 0 ? _uploadDone / _uploadTotal : null,
+                      value: _downloadTotal > 0 ? _downloadDone / _downloadTotal : null,
                     ),
                     const SizedBox(height: 4),
-                    Text('$_uploadDone / $_uploadTotal Chunks',
+                    Text('$_downloadDone / $_downloadTotal Chunks',
                         style: const TextStyle(fontSize: 12)),
                   ],
                 ),
@@ -168,9 +170,9 @@ class _CloudEyesScreenState extends State<CloudEyesScreen> {
                               title: Text(e.name),
                               subtitle: Text('${(e.sizeBytes / 1024).toStringAsFixed(1)} KB'),
                               trailing: ElevatedButton.icon(
-                                icon: const Icon(Icons.cloud_upload),
-                                label: const Text('Upload'),
-                                onPressed: _uploading ? null : () => _pickSlotAndUpload(e),
+                                icon: const Icon(Icons.cloud_download),
+                                label: const Text('Download'),
+                                onPressed: _downloading ? null : () => _pickSlotAndDownload(e),
                               ),
                             ),
                           );

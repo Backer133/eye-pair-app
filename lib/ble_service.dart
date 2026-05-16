@@ -232,6 +232,14 @@ class EyeBle extends ChangeNotifier {
     return true;
   }
 
+  /// Loescht den Cloud-Slot auf Master + Slave.
+  Future<void> deleteEye(int slot) async {
+    final c = _chars[EyeUuids.chrEyeUpload];
+    if (c == null) return;
+    if (slot < 0 || slot >= kCloudSlotCount) return;
+    await c.write([0x03, slot, 0, 0, 0, 0], withoutResponse: false);
+  }
+
   static String _fmtMac(List<int> b) {
     return b.map((x) => x.toRadixString(16).padLeft(2, '0').toUpperCase()).join(':');
   }
