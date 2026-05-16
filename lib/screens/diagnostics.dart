@@ -39,7 +39,6 @@ class DiagnosticsScreen extends StatelessWidget {
         _row(Icons.devices_other, 'Slave MAC', ble.slaveMac, null),
         _row(Icons.image, 'Aktuelles Eye',
              ble.eyeId < kEyeLabels.length ? kEyeLabels[ble.eyeId] : '?', null),
-        _row(Icons.brightness_6, 'Helligkeit', '${ble.brightness}/255', null),
         _row(Icons.animation, 'Animation',
              ble.animEnabled == 1 ? 'an' : 'aus', null),
         _row(Icons.tag, 'PAIR_ID', '${ble.pairId}', null),

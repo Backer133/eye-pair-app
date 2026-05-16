@@ -54,8 +54,9 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
     await _subScan?.cancel();
     _subScan = FlutterBluePlus.onScanResults.listen((rs) {
       for (final r in rs) {
-        final name = r.advertisementData.advName;
-        if (!name.startsWith('EyePair')) continue;
+        // Kein Name-Prefix-Filter mehr - der Service-UUID-Filter in startScan()
+        // sortiert schon BLE-seitig alles Nicht-EyePair-Geraet aus.
+        // Damit erscheinen "Augen Thomas", "Augen Hias", ... korrekt.
         final idx = _results.indexWhere((x) => x.device.remoteId == r.device.remoteId);
         if (idx >= 0) {
           _results[idx] = r;

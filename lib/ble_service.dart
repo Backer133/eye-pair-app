@@ -183,11 +183,7 @@ class EyeBle extends ChangeNotifier {
     eyeId = id; notifyListeners();
   }
 
-  Future<void> setBrightness(int b) async {
-    final c = _chars[EyeUuids.chrBrightness]; if (c == null) return;
-    await c.write([b.clamp(0, 255)], withoutResponse: false);
-    brightness = b; notifyListeners();
-  }
+  // setBrightness entfernt - Funktioniert auf ESP32-C3 mit Arduino Core 2.x nicht zuverlaessig.
 
   Future<void> setAnimEnabled(bool en) async {
     final c = _chars[EyeUuids.chrAnimEn]; if (c == null) return;
