@@ -12,6 +12,8 @@ class EyeUuids {
   static final Guid chrAnimEn    = Guid("6E400004-B5A3-F393-E0A9-E50E24DCCA9E");
   static final Guid chrPairIdBle = Guid("6E400005-B5A3-F393-E0A9-E50E24DCCA9E");
   static final Guid chrEyeCount  = Guid("6E400006-B5A3-F393-E0A9-E50E24DCCA9E");
+  static final Guid chrEyeUpload = Guid("6E400007-B5A3-F393-E0A9-E50E24DCCA9E");
+  static final Guid chrUploadStat= Guid("6E400008-B5A3-F393-E0A9-E50E24DCCA9E");
 
   static final Guid svcDiag      = Guid("6E400010-B5A3-F393-E0A9-E50E24DCCA9E");
   static final Guid chrState     = Guid("6E400011-B5A3-F393-E0A9-E50E24DCCA9E");
@@ -20,6 +22,9 @@ class EyeUuids {
   static final Guid chrSlaveMac  = Guid("6E400014-B5A3-F393-E0A9-E50E24DCCA9E");
   static final Guid chrMasterMac = Guid("6E400015-B5A3-F393-E0A9-E50E24DCCA9E");
 }
+
+const int kHardcodedEyeCount = 4;   // A7, A10, A12, A13 (in dieser Reihenfolge!)
+const int kCloudSlotCount    = 5;   // 5 Slots in LittleFS auf ESP
 
 const Map<int, String> kPairStateNames = {
   0: 'BOOT',
@@ -32,16 +37,15 @@ const Map<int, String> kPairStateNames = {
 };
 
 // Asset-Namen zu Eye-Index. MUSS in der Reihenfolge identisch zu EYE_IMAGES[]
-// im Master.ino + Slave.ino sein!
+// im Master.ino + Slave.ino sein! Nur hardcoded Augen (Index 0..3).
 const List<String> kEyeAssets = [
   'assets/eyes/A7.png',
-  'assets/eyes/A9.png',
   'assets/eyes/A10.png',
   'assets/eyes/A12.png',
   'assets/eyes/A13.png',
 ];
 const List<String> kEyeLabels = [
-  'A7','A9','A10','A12','A13'
+  'A7','A10','A12','A13'
 ];
 
 class EyeBle extends ChangeNotifier {
@@ -192,6 +196,41 @@ class EyeBle extends ChangeNotifier {
   }
 
   // setPairId entfernt - PAIR_ID ist read-only und wird nur im Sketch-Code geaendert.
+
+  // === Cloud-Eye Upload via BLE Chunks ===
+  // Protocol-Header (6 Byte): cmd, slot, idx_lo, idx_hi, total_lo, total_hi
+  // Payload: max 238 Byte data
+  // Master quittiert nicht jeden Chunk - wir nutzen WRITE-WITH-RESPONSE damit
+  // die BLE-Stack-Bestaetigung Flow-Control macht.
+  static const int _kChunkSize = 238;
+
+  Future<bool> uploadEye(int slot, Uint8List rgb565data,
+                          {void Function(int sent, int total)? onProgress}) async {
+    final c = _chars[EyeUuids.chrEyeUpload];
+    if (c == null) return false;
+    if (slot < 0 || slot >= kCloudSlotCount) return false;
+    if (rgb565data.length != 160 * 160 * 2) {
+      throw Exception('rgb565data muss genau ${160*160*2} Bytes haben (ist ${rgb565data.length})');
+    }
+    final total = (rgb565data.length + _kChunkSize - 1) ~/ _kChunkSize;
+    for (int i = 0; i < total; i++) {
+      final start = i * _kChunkSize;
+      final end   = (start + _kChunkSize) > rgb565data.length
+                    ? rgb565data.length
+                    : (start + _kChunkSize);
+      final payload = <int>[
+        0x01, slot,
+        i & 0xFF, (i >> 8) & 0xFF,
+        total & 0xFF, (total >> 8) & 0xFF,
+        ...rgb565data.sublist(start, end),
+      ];
+      await c.write(payload, withoutResponse: false);
+      onProgress?.call(i + 1, total);
+    }
+    // Commit-Marker
+    await c.write([0x02, slot, 0, 0, 0, 0], withoutResponse: false);
+    return true;
+  }
 
   static String _fmtMac(List<int> b) {
     return b.map((x) => x.toRadixString(16).padLeft(2, '0').toUpperCase()).join(':');

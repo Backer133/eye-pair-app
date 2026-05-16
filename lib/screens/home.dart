@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../ble_service.dart';
 import 'settings.dart';
 import 'diagnostics.dart';
+import 'cloud_eyes_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final EyeBle ble;
@@ -32,6 +33,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final ble = widget.ble;
     final screens = [
       _EyeGrid(ble: ble),
+      CloudEyesScreen(ble: ble),
       SettingsScreen(ble: ble),
       DiagnosticsScreen(ble: ble),
     ];
@@ -64,6 +66,7 @@ class _HomeScreenState extends State<HomeScreen> {
         onDestinationSelected: (i) => setState(() => _tab = i),
         destinations: const [
           NavigationDestination(icon: Icon(Icons.grid_view), label: 'Augen'),
+          NavigationDestination(icon: Icon(Icons.cloud_download), label: 'Cloud'),
           NavigationDestination(icon: Icon(Icons.settings), label: 'Einstellungen'),
           NavigationDestination(icon: Icon(Icons.analytics), label: 'Diagnose'),
         ],
@@ -72,15 +75,19 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
+/// Augen-Grid: hardcoded Augen (Asset-Vorschau) + Cloud-Slots (Slot-Nummer).
+/// Total Eyes auf ESP = kHardcodedEyeCount + kCloudSlotCount.
 class _EyeGrid extends StatelessWidget {
   final EyeBle ble;
   const _EyeGrid({required this.ble});
+
+  int get _totalCount => kHardcodedEyeCount + kCloudSlotCount;
 
   @override
   Widget build(BuildContext context) {
     return GridView.builder(
       padding: const EdgeInsets.all(12),
-      itemCount: kEyeAssets.length,
+      itemCount: _totalCount,
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 3,
         crossAxisSpacing: 12,
@@ -88,6 +95,8 @@ class _EyeGrid extends StatelessWidget {
         childAspectRatio: 0.85,
       ),
       itemBuilder: (_, i) {
+        final isCloud  = i >= kHardcodedEyeCount;
+        final cloudSlot = isCloud ? (i - kHardcodedEyeCount) : -1;
         final selected = i == ble.eyeId;
         return Material(
           color: selected
@@ -102,14 +111,28 @@ class _EyeGrid extends StatelessWidget {
               child: Column(
                 children: [
                   Expanded(
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(10),
-                      child: Image.asset(kEyeAssets[i], fit: BoxFit.cover),
-                    ),
+                    child: isCloud
+                        ? Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.cloud,
+                                    size: 32,
+                                    color: Theme.of(context).colorScheme.outline),
+                                const SizedBox(height: 4),
+                                Text('Slot ${cloudSlot + 1}',
+                                    style: const TextStyle(fontSize: 11)),
+                              ],
+                            ),
+                          )
+                        : ClipRRect(
+                            borderRadius: BorderRadius.circular(10),
+                            child: Image.asset(kEyeAssets[i], fit: BoxFit.cover),
+                          ),
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    kEyeLabels[i],
+                    isCloud ? 'Cloud ${cloudSlot + 1}' : kEyeLabels[i],
                     style: TextStyle(
                       fontWeight: selected ? FontWeight.bold : FontWeight.normal,
                     ),
