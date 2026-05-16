@@ -26,3 +26,6 @@ ios/Flutter/Generated.xcconfig
 
 # Logs
 *.log
+
+# Lokale APK-Downloads aus GitHub Actions
+release/

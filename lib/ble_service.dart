@@ -37,13 +37,11 @@ const List<String> kEyeAssets = [
   'assets/eyes/A7.png',
   'assets/eyes/A9.png',
   'assets/eyes/A10.png',
-  'assets/eyes/A11.png',
   'assets/eyes/A12.png',
   'assets/eyes/A13.png',
-  'assets/eyes/A14.png',
 ];
 const List<String> kEyeLabels = [
-  'A7','A9','A10','A11','A12','A13','A14'
+  'A7','A9','A10','A12','A13'
 ];
 
 class EyeBle extends ChangeNotifier {
