@@ -11,20 +11,12 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   late double _brightness;
   late bool _anim;
-  late TextEditingController _pidCtl;
 
   @override
   void initState() {
     super.initState();
     _brightness = widget.ble.brightness.toDouble();
     _anim = widget.ble.animEnabled == 1;
-    _pidCtl = TextEditingController(text: widget.ble.pairId.toString());
-  }
-
-  @override
-  void dispose() {
-    _pidCtl.dispose();
-    super.dispose();
   }
 
   @override
@@ -68,57 +60,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
               setState(() => _anim = v);
               widget.ble.setAnimEnabled(v);
             },
-          ),
-        ),
-        const SizedBox(height: 8),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: const [
-                    Icon(Icons.group_work),
-                    SizedBox(width: 8),
-                    Text('PAIR_ID', style: TextStyle(fontSize: 16)),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  'PAIR_ID trennt mehrere Augenpaare auf gleichem Channel. '
-                  'Aenderung erst nach Reboot des Masters wirksam.',
-                  style: TextStyle(fontSize: 12, color: Colors.grey),
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _pidCtl,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          border: OutlineInputBorder(),
-                          labelText: '1..255',
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    ElevatedButton(
-                      child: const Text('Setzen'),
-                      onPressed: () {
-                        final v = int.tryParse(_pidCtl.text);
-                        if (v == null || v < 1 || v > 255) return;
-                        widget.ble.setPairId(v);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('PAIR_ID $v gespeichert. Master rebooten.')),
-                        );
-                      },
-                    ),
-                  ],
-                ),
-              ],
-            ),
           ),
         ),
       ],

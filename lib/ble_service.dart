@@ -195,11 +195,7 @@ class EyeBle extends ChangeNotifier {
     animEnabled = en ? 1 : 0; notifyListeners();
   }
 
-  Future<void> setPairId(int pid) async {
-    final c = _chars[EyeUuids.chrPairIdBle]; if (c == null) return;
-    await c.write([pid.clamp(1, 255)], withoutResponse: false);
-    pairId = pid; notifyListeners();
-  }
+  // setPairId entfernt - PAIR_ID ist read-only und wird nur im Sketch-Code geaendert.
 
   static String _fmtMac(List<int> b) {
     return b.map((x) => x.toRadixString(16).padLeft(2, '0').toUpperCase()).join(':');
