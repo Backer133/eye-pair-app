@@ -1,0 +1,109 @@
+name: Build EyePair App
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  workflow_dispatch:     # erlaubt manuelles Starten ueber GitHub-UI
+
+jobs:
+  # ============ Android APK Build ============
+  android:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.0'
+          channel: 'stable'
+
+      - name: Init plattform-spezifische Templates
+        run: flutter create . --platforms=android,ios --project-name=eye_pair_app
+
+      - name: Install deps
+        run: flutter pub get
+
+      - name: Apply Android permissions + minSdk
+        run: |
+          MANIFEST=android/app/src/main/AndroidManifest.xml
+          # xmlns:tools im manifest-Tag
+          sed -i 's|<manifest |<manifest xmlns:tools="http://schemas.android.com/tools" |' $MANIFEST
+          # BLE-Permissions vor <application> einfuegen
+          sed -i '/<application/i \
+              <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" tools:targetApi="s" />\
+              <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />\
+              <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />\
+              <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />\
+              <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />' $MANIFEST
+          # minSdkVersion 21 (sowohl Groovy- als auch Kotlin-DSL Versionen abdecken)
+          sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 21/' android/app/build.gradle.kts 2>/dev/null || true
+          sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/' android/app/build.gradle 2>/dev/null || true
+          echo "=== Manifest ==="
+          cat $MANIFEST
+
+      - name: Build APK
+        run: flutter build apk --release
+
+      - name: Upload APK als Artefakt
+        uses: actions/upload-artifact@v4
+        with:
+          name: eye_pair_app-android-release
+          path: build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Release bei git-tag (z.B. v1.0.0)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/app/outputs/flutter-apk/app-release.apk
+
+  # ============ iOS IPA Build (optional) ============
+  # Laeuft nur bei manuellem Start oder Tag-Push - macOS-Runner sind teurer in CI-Minuten
+  ios:
+    name: Build iOS IPA (unsigned)
+    runs-on: macos-14
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.0'
+          channel: 'stable'
+
+      - name: Init Templates
+        run: flutter create . --platforms=android,ios --project-name=eye_pair_app
+
+      - name: Install deps
+        run: flutter pub get
+
+      - name: Add iOS Bluetooth-Permission Keys
+        run: |
+          /usr/libexec/PlistBuddy -c "Add :NSBluetoothAlwaysUsageDescription string 'EyePair benoetigt Bluetooth fuer die Augen-Steuerung.'" ios/Runner/Info.plist || true
+          /usr/libexec/PlistBuddy -c "Add :NSBluetoothPeripheralUsageDescription string 'EyePair benoetigt Bluetooth fuer die Augen-Steuerung.'" ios/Runner/Info.plist || true
+
+      - name: Build iOS unsigned
+        run: flutter build ios --release --no-codesign
+
+      - name: Package .ipa Payload
+        run: |
+          cd build/ios/iphoneos
+          mkdir -p Payload
+          cp -r Runner.app Payload/
+          zip -qr eye_pair_app-unsigned.ipa Payload
+          ls -la
+
+      - name: Upload IPA als Artefakt
+        uses: actions/upload-artifact@v4
+        with:
+          name: eye_pair_app-ios-unsigned
+          path: build/ios/iphoneos/eye_pair_app-unsigned.ipa
