@@ -34,12 +34,7 @@ const Map<int, String> kPairStateNames = {
 // Asset-Namen zu Eye-Index. MUSS in der Reihenfolge identisch zu EYE_IMAGES[]
 // im Master.ino + Slave.ino sein!
 const List<String> kEyeAssets = [
-  'assets/eyes/A1.jpg',
-  'assets/eyes/A2.jpg',
-  'assets/eyes/A3.jpg',
-  'assets/eyes/A5.png',
   'assets/eyes/A7.png',
-  'assets/eyes/A8.png',
   'assets/eyes/A9.png',
   'assets/eyes/A10.png',
   'assets/eyes/A11.png',
@@ -48,7 +43,7 @@ const List<String> kEyeAssets = [
   'assets/eyes/A14.png',
 ];
 const List<String> kEyeLabels = [
-  'A1','A2','A3','A5','A7','A8','A9','A10','A11','A12','A13','A14'
+  'A7','A9','A10','A11','A12','A13','A14'
 ];
 
 class EyeBle extends ChangeNotifier {
