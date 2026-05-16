@@ -4,6 +4,7 @@
 //   slot_<pair_id>_<slot>_name  -> String (Anzeigename)
 
 import 'package:shared_preferences/shared_preferences.dart';
+import 'ble_service.dart';  // kCloudSlotCount
 
 class SlotMeta {
   final String name;
@@ -33,5 +34,17 @@ class SlotMetadataStore {
     final sp = await SharedPreferences.getInstance();
     await sp.remove(_keyUrl(pairId, slot));
     await sp.remove(_keyName(pairId, slot));
+  }
+
+  /// Set aller URLs die fuer das angegebene Pair derzeit in irgendeinem Slot installiert sind.
+  /// Wird vom Cloud-Tab benutzt um bereits installierte Bilder auszublenden.
+  static Future<Set<String>> getInstalledUrls(int pairId) async {
+    final sp = await SharedPreferences.getInstance();
+    final urls = <String>{};
+    for (int s = 0; s < kCloudSlotCount; s++) {
+      final url = sp.getString(_keyUrl(pairId, s));
+      if (url != null && url.isNotEmpty) urls.add(url);
+    }
+    return urls;
   }
 }

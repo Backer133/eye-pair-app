@@ -12,8 +12,9 @@ class EyeUuids {
   static final Guid chrAnimEn    = Guid("6E400004-B5A3-F393-E0A9-E50E24DCCA9E");
   static final Guid chrPairIdBle = Guid("6E400005-B5A3-F393-E0A9-E50E24DCCA9E");
   static final Guid chrEyeCount  = Guid("6E400006-B5A3-F393-E0A9-E50E24DCCA9E");
-  static final Guid chrEyeUpload = Guid("6E400007-B5A3-F393-E0A9-E50E24DCCA9E");
-  static final Guid chrUploadStat= Guid("6E400008-B5A3-F393-E0A9-E50E24DCCA9E");
+  static final Guid chrEyeUpload    = Guid("6E400007-B5A3-F393-E0A9-E50E24DCCA9E");
+  static final Guid chrUploadStat   = Guid("6E400008-B5A3-F393-E0A9-E50E24DCCA9E");
+  static final Guid chrSlaveReceipt = Guid("6E400009-B5A3-F393-E0A9-E50E24DCCA9E");
 
   static final Guid svcDiag      = Guid("6E400010-B5A3-F393-E0A9-E50E24DCCA9E");
   static final Guid chrState     = Guid("6E400011-B5A3-F393-E0A9-E50E24DCCA9E");
@@ -64,6 +65,12 @@ class EyeBle extends ChangeNotifier {
   String slaveMac = "--";
   String masterMac = "--";
   bool connected = false;
+  // Slave-Receipt nach Cloud-Eye-Upload
+  int slaveReceiptSlot      = 0;
+  int slaveUniqueReceived   = 0;
+  int slaveTotalChunks      = 0;
+  int slaveReRequestRound   = 0;
+  StreamSubscription<List<int>>? _subSlaveReceipt;
 
   StreamSubscription<List<int>>? _subEyeId;
   StreamSubscription<List<int>>? _subState;
@@ -94,11 +101,19 @@ class EyeBle extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Reconnect zum gleichen Master nach Disconnect (z.B. nach Cloud-Upload).
+  /// Wirft Exception wenn kein device bekannt oder Reconnect fehlschlaegt.
+  Future<void> reconnect() async {
+    if (device == null) throw Exception('Kein vorheriges Geraet bekannt');
+    await connectAndDiscover(device!);
+  }
+
   Future<void> disconnect() async {
     await _subEyeId?.cancel();
     await _subState?.cancel();
     await _subLoss?.cancel();
     await _subSilence?.cancel();
+    await _subSlaveReceipt?.cancel();
     await _subConn?.cancel();
     _chars.clear();
     try { await device?.disconnect(); } catch (_) {}
@@ -130,6 +145,17 @@ class EyeBle extends ChangeNotifier {
     if (sil != null && sil.length >= 4) {
       silenceMs = ByteData.sublistView(Uint8List.fromList(sil)).getUint32(0, Endian.little);
     }
+    final rcp = await _readBytes(EyeUuids.chrSlaveReceipt);
+    if (rcp != null && rcp.length >= 6) {
+      _parseReceipt(rcp);
+    }
+  }
+
+  void _parseReceipt(List<int> v) {
+    slaveReceiptSlot    = v[0];
+    slaveUniqueReceived = v[1] | (v[2] << 8);
+    slaveTotalChunks    = v[3] | (v[4] << 8);
+    slaveReRequestRound = v[5];
   }
 
   Future<void> _subscribeNotifies() async {
@@ -162,6 +188,13 @@ class EyeBle extends ChangeNotifier {
           silenceMs = ByteData.sublistView(Uint8List.fromList(v)).getUint32(0, Endian.little);
           notifyListeners();
         }
+      });
+    }
+    final crcp = _chars[EyeUuids.chrSlaveReceipt];
+    if (crcp != null) {
+      await crcp.setNotifyValue(true);
+      _subSlaveReceipt = crcp.lastValueStream.listen((v) {
+        if (v.length >= 6) { _parseReceipt(v); notifyListeners(); }
       });
     }
   }

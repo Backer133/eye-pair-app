@@ -4,7 +4,7 @@ Neue Augen-Bilder fuer das EyePair-System einfach hier reinwerfen.
 
 ## Wie ein neues Auge hinzufuegen
 
-1. **PNG erstellen** — am besten **160 x 160 Pixel** (die App resized aber bei Bedarf auch automatisch)
+1. **PNG erstellen** — am besten **160 x 160 Pixel** mit **weissem Hintergrund** (das Display ist weiss; transparente/schwarze Hintergruende werden NICHT mehr automatisch ersetzt)
 2. **Aussagekraeftigen Dateinamen geben**, z.B. `Drache.png`, `Maus.png`, `Pirat.png`
 3. **In diesen Ordner committen + pushen**:
    ```bash

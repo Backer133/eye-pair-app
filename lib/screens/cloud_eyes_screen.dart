@@ -34,8 +34,12 @@ class _CloudEyesScreenState extends State<CloudEyesScreen> {
     setState(() { _loading = true; _error = null; });
     try {
       final list = await _api.list();
+      // Bereits installierte Bilder ausblenden - die User loescht sie via Long-press
+      // im Eye-Grid, dann tauchen sie hier wieder auf.
+      final installed = await SlotMetadataStore.getInstalledUrls(widget.ble.pairId);
+      final visible = list.where((e) => !installed.contains(e.downloadUrl)).toList();
       if (!mounted) return;
-      setState(() { _eyes = list; _loading = false; });
+      setState(() { _eyes = visible; _loading = false; });
     } catch (e) {
       if (!mounted) return;
       setState(() { _error = e.toString(); _loading = false; });
@@ -60,18 +64,11 @@ class _CloudEyesScreenState extends State<CloudEyesScreen> {
       // Slot-Metadata persistieren
       await SlotMetadataStore.set(widget.ble.pairId, slot, eye.name, eye.downloadUrl);
       await widget.onSlotMetaChanged?.call();
+      // Cloud-Tab Liste aktualisieren (Bild verschwindet weil installiert)
+      await _refresh();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('"${eye.name}" auf Slot ${slot + 1} geladen.\n'
-              'App trennt sich kurz, damit Master ungestoert an Slave senden kann.'),
-          duration: const Duration(seconds: 4),
-        ),
-      );
-      await Future.delayed(const Duration(milliseconds: 700));
-      try { await widget.ble.disconnect(); } catch (_) {}
-      if (!mounted) return;
-      Navigator.of(context).popUntil((r) => r.isFirst);
+      // Status-Dialog: zeigt Slave-Forward Progress + Auto-Reconnect zum Receipt-Read
+      await _showSlaveForwardDialog(eye.name, slot);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -80,6 +77,27 @@ class _CloudEyesScreenState extends State<CloudEyesScreen> {
     } finally {
       if (mounted) setState(() { _downloading = false; });
     }
+  }
+
+  /// Zeigt einen Status-Dialog mit Countdown waehrend Master->Slave forwarded,
+  /// disconnected die App fuer Coex-Schutz, reconnected dann fuer Receipt-Read.
+  Future<void> _showSlaveForwardDialog(String eyeName, int slot) async {
+    // App disconnecten - Master forwarded jetzt ohne BLE-Coex
+    try { await widget.ble.disconnect(); } catch (_) {}
+
+    if (!mounted) return;
+    // Non-dismissable Dialog mit Countdown
+    final result = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => _SlaveForwardDialog(ble: widget.ble, eyeName: eyeName, slot: slot),
+    );
+
+    if (!mounted) return;
+    if (result != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(result)));
+    }
+    Navigator.of(context).popUntil((r) => r.isFirst);
   }
 
   Future<void> _pickSlotAndDownload(CloudEye eye) async {
@@ -180,6 +198,115 @@ class _CloudEyesScreenState extends State<CloudEyesScreen> {
                       ),
           ),
         ),
+      ],
+    );
+  }
+}
+
+/// Status-Dialog der waehrend Master->Slave-Forward angezeigt wird.
+/// - Startet bei Dialog-Open einen Reconnect-Timer (15s)
+/// - Nach Reconnect liest er CHR_SLAVE_RECEIPT, zeigt unique/total
+/// - Bei Re-Request: wartet weiter, liest erneut
+class _SlaveForwardDialog extends StatefulWidget {
+  final EyeBle ble;
+  final String eyeName;
+  final int    slot;
+  const _SlaveForwardDialog({required this.ble, required this.eyeName, required this.slot});
+  @override
+  State<_SlaveForwardDialog> createState() => _SlaveForwardDialogState();
+}
+
+class _SlaveForwardDialogState extends State<_SlaveForwardDialog> {
+  String _status = 'Lade auf Slave...';
+  String _detail = 'Geschaetzt ~15 Sekunden';
+  bool   _done = false;
+  int    _reconnectAttempts = 0;
+  static const int _maxReconnects = 5;
+
+  @override
+  void initState() {
+    super.initState();
+    // Nach 15s Auto-Reconnect-Versuch
+    Future.delayed(const Duration(seconds: 15), _tryReconnect);
+    widget.ble.addListener(_onBleUpdate);
+  }
+
+  @override
+  void dispose() {
+    widget.ble.removeListener(_onBleUpdate);
+    super.dispose();
+  }
+
+  void _onBleUpdate() {
+    if (!mounted) return;
+    // Wenn wir nach Reconnect eine Receipt sehen, Status updaten
+    final unique = widget.ble.slaveUniqueReceived;
+    final total  = widget.ble.slaveTotalChunks;
+    final round  = widget.ble.slaveReRequestRound;
+    if (total > 0) {
+      if (unique >= total) {
+        setState(() {
+          _status = 'Fertig!';
+          _detail = 'Bild komplett auf beiden Augen (${unique}/${total} Chunks)';
+          _done = true;
+        });
+        Future.delayed(const Duration(seconds: 2), () {
+          if (mounted) Navigator.of(context).pop(
+            '"${widget.eyeName}" erfolgreich uebertragen ($unique/$total Chunks)');
+        });
+      } else {
+        setState(() {
+          _detail = 'Re-Request Runde $round laeuft: $unique/$total Chunks';
+        });
+        // Noch nicht komplett -> warte weiter, ggf. erneut Receipt holen
+        Future.delayed(const Duration(seconds: 5), _tryReconnect);
+      }
+    }
+  }
+
+  Future<void> _tryReconnect() async {
+    if (!mounted || _done) return;
+    _reconnectAttempts++;
+    if (_reconnectAttempts > _maxReconnects) {
+      setState(() {
+        _status = 'Konnte Slave-Status nicht abrufen';
+        _detail = 'Bild ist wahrscheinlich auf beiden Augen, aber keine Bestaetigung';
+        _done = true;
+      });
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) Navigator.of(context).pop(null);
+      });
+      return;
+    }
+    try {
+      if (!widget.ble.connected) {
+        setState(() { _detail = 'Reconnect $_reconnectAttempts/$_maxReconnects...'; });
+        await widget.ble.reconnect();
+      }
+    } catch (e) {
+      // Reconnect fehlgeschlagen, nochmal in 3s versuchen
+      Future.delayed(const Duration(seconds: 3), _tryReconnect);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(_status),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (!_done) const LinearProgressIndicator(),
+          const SizedBox(height: 16),
+          Text(_detail, textAlign: TextAlign.center),
+        ],
+      ),
+      actions: [
+        if (!_done)
+          TextButton(
+            onPressed: () => Navigator.of(context).pop('Abgebrochen — Bild wird trotzdem fertig uebertragen'),
+            child: const Text('Abbrechen'),
+          ),
       ],
     );
   }
