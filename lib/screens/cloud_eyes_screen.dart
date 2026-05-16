@@ -58,8 +58,18 @@ class _CloudEyesScreenState extends State<CloudEyesScreen> {
       });
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('"${eye.name}" auf Slot ${slot + 1} hochgeladen')),
+        SnackBar(
+          content: Text('"${eye.name}" auf Slot ${slot + 1} hochgeladen.\n'
+              'App trennt sich kurz, damit Master ungestoert an Slave senden kann.'),
+          duration: const Duration(seconds: 4),
+        ),
       );
+      // Kurz warten damit Master den COMMIT verarbeitet, dann disconnect.
+      // Das beendet die BLE-Coex-Stoerung -> Master kann sauber an Slave forwarden.
+      await Future.delayed(const Duration(milliseconds: 700));
+      try { await widget.ble.disconnect(); } catch (_) {}
+      if (!mounted) return;
+      Navigator.of(context).popUntil((r) => r.isFirst);  // zurueck zur Discovery
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
