@@ -135,8 +135,8 @@ class _CloudEyesScreenState extends State<CloudEyesScreen> {
                     ? ListView(
                         children: const [
                           SizedBox(height: 200),
-                          Center(child: Text('Keine Cloud-Augen gefunden.\n'
-                              'PNG ins cloud-eyes/ im GitHub-Repo pushen.',
+                          Center(child: Text('Keine Augen in der Cloud gefunden.\n'
+                              'Der Admin hat noch keine Augen bereit gestellt.',
                               textAlign: TextAlign.center)),
                         ],
                       )
