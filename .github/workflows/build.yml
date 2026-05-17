@@ -52,6 +52,12 @@ jobs:
           echo "=== Manifest ==="
           cat $MANIFEST
 
+      - name: Set Android app label
+        run: |
+          MANIFEST=android/app/src/main/AndroidManifest.xml
+          sed -i 's|android:label="eye_pair_app"|android:label="SBP Eye App"|' $MANIFEST
+          grep 'android:label' $MANIFEST
+
       - name: Build APK
         run: flutter build apk --release
 
@@ -92,6 +98,14 @@ jobs:
         run: |
           /usr/libexec/PlistBuddy -c "Add :NSBluetoothAlwaysUsageDescription string 'EyePair benoetigt Bluetooth fuer die Augen-Steuerung.'" ios/Runner/Info.plist || true
           /usr/libexec/PlistBuddy -c "Add :NSBluetoothPeripheralUsageDescription string 'EyePair benoetigt Bluetooth fuer die Augen-Steuerung.'" ios/Runner/Info.plist || true
+
+      - name: Set iOS display name
+        run: |
+          PLIST=ios/Runner/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName 'SBP Eye App'" $PLIST || \
+            /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string 'SBP Eye App'" $PLIST
+          /usr/libexec/PlistBuddy -c "Set :CFBundleName 'SBP Eye App'" $PLIST || true
+          /usr/libexec/PlistBuddy -c "Print :CFBundleDisplayName" $PLIST
 
       - name: Build iOS unsigned
         run: flutter build ios --release --no-codesign
