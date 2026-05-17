@@ -97,7 +97,10 @@ class _CloudEyesScreenState extends State<CloudEyesScreen> {
     if (result != null) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(result)));
     }
-    Navigator.of(context).popUntil((r) => r.isFirst);
+    // Dialog ist nach showDialog() automatisch geschlossen - kein weiteres pop noetig.
+    // Vorher hat ein popUntil((r) => r.isFirst) HomeScreen vom Stack genommen und
+    // User zu DiscoveryScreen zurueck-geworfen, was als "schwarzer Bildschirm"
+    // wahrgenommen wurde.
   }
 
   Future<void> _pickSlotAndDownload(CloudEye eye) async {
@@ -220,6 +223,7 @@ class _SlaveForwardDialogState extends State<_SlaveForwardDialog> {
   String _status = 'Lade auf Slave...';
   String _detail = 'Geschaetzt ~15 Sekunden';
   bool   _done = false;
+  bool   _pendingReconnect = false;
   int    _reconnectAttempts = 0;
   static const int _maxReconnects = 5;
 
@@ -238,7 +242,7 @@ class _SlaveForwardDialogState extends State<_SlaveForwardDialog> {
   }
 
   void _onBleUpdate() {
-    if (!mounted) return;
+    if (!mounted || _done) return;   // Guard gegen Notifies nach Erfolg
     // Wenn wir nach Reconnect eine Receipt sehen, Status updaten
     final unique = widget.ble.slaveUniqueReceived;
     final total  = widget.ble.slaveTotalChunks;
@@ -258,8 +262,16 @@ class _SlaveForwardDialogState extends State<_SlaveForwardDialog> {
         setState(() {
           _detail = 'Re-Request Runde $round laeuft: $unique/$total Chunks';
         });
-        // Noch nicht komplett -> warte weiter, ggf. erneut Receipt holen
-        Future.delayed(const Duration(seconds: 5), _tryReconnect);
+        // Noch nicht komplett -> warte weiter, ggf. erneut Receipt holen.
+        // Guard: nur EIN Reconnect-Timer pro 5s-Fenster, sonst koennen viele
+        // Notifies in Serie viele parallele _tryReconnect-Calls triggern.
+        if (!_pendingReconnect) {
+          _pendingReconnect = true;
+          Future.delayed(const Duration(seconds: 5), () {
+            _pendingReconnect = false;
+            _tryReconnect();
+          });
+        }
       }
     }
   }
