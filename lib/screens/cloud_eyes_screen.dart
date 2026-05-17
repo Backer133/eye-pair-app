@@ -57,13 +57,10 @@ class _CloudEyesScreenState extends State<CloudEyesScreen> {
     try {
       final pngBytes = await _api.download(eye);
       final rgb565 = pngToRgb565(pngBytes);
-      await widget.ble.uploadEye(slot, rgb565,
-          onProgress: (sent, total) {
-            if (!mounted) return;
-            setState(() { _downloadDone = sent; _downloadTotal = total; });
-          },
-          metaName: eye.name,
-          metaUrl: eye.downloadUrl);
+      await widget.ble.uploadEye(slot, rgb565, onProgress: (sent, total) {
+        if (!mounted) return;
+        setState(() { _downloadDone = sent; _downloadTotal = total; });
+      });
       // Slot-Metadata persistieren
       await SlotMetadataStore.set(widget.ble.pairId, slot, eye.name, eye.downloadUrl);
       await widget.onSlotMetaChanged?.call();

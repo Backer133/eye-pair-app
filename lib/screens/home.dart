@@ -16,8 +16,6 @@ class _HomeScreenState extends State<HomeScreen> {
   int _tab = 0;
   // Slot-Metadata Cache: [slot_idx] -> SlotMeta? (null = leer)
   final List<SlotMeta?> _slotMeta = List<SlotMeta?>.filled(kCloudSlotCount, null);
-  // Recovery vom Master nach App-Reinstall: nur einmal pro Connect.
-  bool _metaRecoveryDone = false;
 
   @override
   void initState() {
@@ -42,24 +40,6 @@ class _HomeScreenState extends State<HomeScreen> {
     final pid = widget.ble.pairId;
     for (int s = 0; s < kCloudSlotCount; s++) {
       _slotMeta[s] = await SlotMetadataStore.get(pid, s);
-    }
-    // Recovery vom Master: nur einmal pro Connect, nur wenn BLE verbunden und
-    // Master mind. einen Slot als belegt meldet. Vermeidet parallele BLE-Reads
-    // wenn _onBleUpdate mehrfach in Folge feuert.
-    if (!_metaRecoveryDone &&
-        widget.ble.connected &&
-        widget.ble.slotOccupiedMask != 0) {
-      _metaRecoveryDone = true;
-      for (int s = 0; s < kCloudSlotCount; s++) {
-        if (_slotMeta[s] == null &&
-            (widget.ble.slotOccupiedMask & (1 << s)) != 0) {
-          final esp = await widget.ble.getSlotMeta(s);
-          if (esp != null) {
-            await SlotMetadataStore.set(pid, s, esp.name, esp.url);
-            _slotMeta[s] = SlotMeta(esp.name, esp.url);
-          }
-        }
-      }
     }
     if (mounted) setState(() {});
   }
@@ -199,23 +179,28 @@ class _EyeGrid extends StatelessWidget {
                                 )
                               : Container(
                                   color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                                  child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      Icon(
-                                          occupied ? Icons.cloud_done : Icons.cloud_outlined,
-                                          size: 32,
-                                          color: occupied
-                                              ? Theme.of(context).colorScheme.primary
-                                              : Theme.of(context).colorScheme.outline),
-                                      const SizedBox(height: 4),
-                                      Text(occupied ? 'belegt' : 'leer',
-                                          style: TextStyle(
-                                              fontSize: 11,
-                                              color: occupied
-                                                  ? Theme.of(context).colorScheme.primary
-                                                  : Theme.of(context).colorScheme.outline)),
-                                    ],
+                                  child: Center(
+                                    child: occupied
+                                        // Reinstall-Fall: Master kennt den Slot noch, App nicht.
+                                        // Reiner Text, kein Icon - User weiss "da ist was".
+                                        ? Text('belegt',
+                                            style: TextStyle(
+                                                fontSize: 12,
+                                                color: Theme.of(context).colorScheme.onSurfaceVariant))
+                                        // Echt leer: Cloud-Icon + Text (Originalverhalten).
+                                        : Column(
+                                            mainAxisAlignment: MainAxisAlignment.center,
+                                            children: [
+                                              Icon(Icons.cloud,
+                                                  size: 32,
+                                                  color: Theme.of(context).colorScheme.outline),
+                                              const SizedBox(height: 4),
+                                              Text('leer',
+                                                  style: TextStyle(
+                                                      fontSize: 11,
+                                                      color: Theme.of(context).colorScheme.outline)),
+                                            ],
+                                          ),
                                   ),
                                 ))
                           : Image.asset(kEyeAssets[i], fit: BoxFit.cover),

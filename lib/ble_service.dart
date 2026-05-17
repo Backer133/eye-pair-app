@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
@@ -17,7 +16,6 @@ class EyeUuids {
   static final Guid chrUploadStat   = Guid("6E400008-B5A3-F393-E0A9-E50E24DCCA9E");
   static final Guid chrSlaveReceipt = Guid("6E400009-B5A3-F393-E0A9-E50E24DCCA9E");
   static final Guid chrSlotStatus   = Guid("6E40000A-B5A3-F393-E0A9-E50E24DCCA9E");
-  static final Guid chrSlotMeta     = Guid("6E40000B-B5A3-F393-E0A9-E50E24DCCA9E");
 
   static final Guid svcDiag      = Guid("6E400010-B5A3-F393-E0A9-E50E24DCCA9E");
   static final Guid chrState     = Guid("6E400011-B5A3-F393-E0A9-E50E24DCCA9E");
@@ -75,11 +73,10 @@ class EyeBle extends ChangeNotifier {
   int slaveReRequestRound   = 0;
   StreamSubscription<List<int>>? _subSlaveReceipt;
   // Slot-Bitmap (Bit n = Slot n hat ein Bild auf dem Master in LittleFS).
-  // Wird bei jedem Connect aus CHR_SLOT_STATUS gelesen, anschliessend per Notify
-  // gepflegt. Damit kennt die App nach Reinstall die Slot-Belegung auch ohne
-  // lokale SharedPreferences-Metadata.
+  // Wird nur EINMAL beim Connect aus CHR_SLOT_STATUS gelesen (kein Notify mehr -
+  // das hat den ESP-NOW-Forward gestoert). Reicht fuer "belegt"-Anzeige nach
+  // App-Reinstall: SharedPreferences leer, aber Master kennt den Status noch.
   int slotOccupiedMask      = 0;
-  StreamSubscription<List<int>>? _subSlotStatus;
 
   StreamSubscription<List<int>>? _subEyeId;
   StreamSubscription<List<int>>? _subState;
@@ -123,7 +120,6 @@ class EyeBle extends ChangeNotifier {
     await _subLoss?.cancel();
     await _subSilence?.cancel();
     await _subSlaveReceipt?.cancel();
-    await _subSlotStatus?.cancel();
     await _subConn?.cancel();
     _chars.clear();
     try { await device?.disconnect(); } catch (_) {}
@@ -209,13 +205,8 @@ class EyeBle extends ChangeNotifier {
         if (v.length >= 6) { _parseReceipt(v); notifyListeners(); }
       });
     }
-    final css = _chars[EyeUuids.chrSlotStatus];
-    if (css != null) {
-      await css.setNotifyValue(true);
-      _subSlotStatus = css.lastValueStream.listen((v) {
-        if (v.isNotEmpty) { slotOccupiedMask = v[0]; notifyListeners(); }
-      });
-    }
+    // chrSlotStatus wird nur EINMAL via _readAll gelesen - kein Notify-Subscribe,
+    // weil das beim ESP zu BLE-Coex-Druck waehrend Forward gefuehrt hat.
   }
 
   Future<int?> _readByte(Guid uuid) async {
@@ -257,9 +248,7 @@ class EyeBle extends ChangeNotifier {
   static const int _kChunkSize = 238;
 
   Future<bool> uploadEye(int slot, Uint8List rgb565data,
-                          {void Function(int sent, int total)? onProgress,
-                           String? metaName,
-                           String? metaUrl}) async {
+                          {void Function(int sent, int total)? onProgress}) async {
     final c = _chars[EyeUuids.chrEyeUpload];
     if (c == null) return false;
     if (slot < 0 || slot >= kCloudSlotCount) return false;
@@ -281,58 +270,9 @@ class EyeBle extends ChangeNotifier {
       await c.write(payload, withoutResponse: false);
       onProgress?.call(i + 1, total);
     }
-    // Metadata-Persist vor COMMIT, damit der Slot nach App-Reinstall wiederfindbar ist.
-    if (metaName != null && metaUrl != null) {
-      try { await setSlotMeta(slot, metaName, metaUrl); } catch (_) {}
-    }
     // Commit-Marker
     await c.write([0x02, slot, 0, 0, 0, 0], withoutResponse: false);
     return true;
-  }
-
-  /// Sendet Name + URL fuer Slot via cmd=0x04 an Master, der das in
-  /// /eyes/XX.meta auf LittleFS persistiert. Damit ueberlebt die Slot-Belegung
-  /// einen App-Reinstall (SharedPreferences sind weg, aber Master kennt es).
-  Future<void> setSlotMeta(int slot, String name, String url) async {
-    final c = _chars[EyeUuids.chrEyeUpload];
-    if (c == null) return;
-    if (slot < 0 || slot >= kCloudSlotCount) return;
-    final nameBytes = utf8.encode(name);
-    final urlBytes  = utf8.encode(url);
-    if (nameBytes.length > 64 || urlBytes.length > 200) {
-      throw Exception('Slot-Meta zu lang: name=${nameBytes.length} bytes (max 64), url=${urlBytes.length} bytes (max 200)');
-    }
-    final payload = <int>[
-      0x04, slot,
-      nameBytes.length, ...nameBytes,
-      urlBytes.length,  ...urlBytes,
-    ];
-    await c.write(payload, withoutResponse: false);
-  }
-
-  /// Holt Name + URL fuer Slot vom Master. Protocol: WRITE 1 Byte (slot)
-  /// auf CHR_SLOT_META, dann READ liefert [name_len][name][url_len][url].
-  /// Liefert null wenn Slot leer/keine Metadaten gespeichert.
-  Future<({String name, String url})?> getSlotMeta(int slot) async {
-    final c = _chars[EyeUuids.chrSlotMeta];
-    if (c == null) return null;
-    if (slot < 0 || slot >= kCloudSlotCount) return null;
-    try {
-      await c.write([slot], withoutResponse: false);
-      final v = await c.read();
-      if (v.length < 2) return null;
-      final nameLen = v[0];
-      if (v.length < 1 + nameLen + 1) return null;
-      final urlLenPos = 1 + nameLen;
-      final urlLen = v[urlLenPos];
-      if (v.length < urlLenPos + 1 + urlLen) return null;
-      if (nameLen == 0 && urlLen == 0) return null;  // leer
-      final name = utf8.decode(v.sublist(1, 1 + nameLen), allowMalformed: true);
-      final url  = utf8.decode(v.sublist(urlLenPos + 1, urlLenPos + 1 + urlLen), allowMalformed: true);
-      return (name: name, url: url);
-    } catch (_) {
-      return null;
-    }
   }
 
   /// Loescht den Cloud-Slot auf Master + Slave.
