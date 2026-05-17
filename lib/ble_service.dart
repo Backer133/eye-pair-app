@@ -272,6 +272,10 @@ class EyeBle extends ChangeNotifier {
     }
     // Commit-Marker
     await c.write([0x02, slot, 0, 0, 0, 0], withoutResponse: false);
+    // Mask lokal setzen - Master notifyt nicht (BLE-Coex), wir wollen aber die
+    // Slot-Status-Anzeige aktuell halten ohne Reconnect.
+    slotOccupiedMask |= (1 << slot);
+    notifyListeners();
     return true;
   }
 
@@ -281,6 +285,10 @@ class EyeBle extends ChangeNotifier {
     if (c == null) return;
     if (slot < 0 || slot >= kCloudSlotCount) return;
     await c.write([0x03, slot, 0, 0, 0, 0], withoutResponse: false);
+    // Mask lokal nachfuehren - Master notifyt nicht (BLE-Coex), wir muessten sonst
+    // bis zum naechsten Connect warten bis "belegt" verschwindet.
+    slotOccupiedMask &= ~(1 << slot);
+    notifyListeners();
   }
 
   static String _fmtMac(List<int> b) {
