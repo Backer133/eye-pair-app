@@ -15,6 +15,7 @@ class EyeUuids {
   static final Guid chrEyeUpload    = Guid("6E400007-B5A3-F393-E0A9-E50E24DCCA9E");
   static final Guid chrUploadStat   = Guid("6E400008-B5A3-F393-E0A9-E50E24DCCA9E");
   static final Guid chrSlaveReceipt = Guid("6E400009-B5A3-F393-E0A9-E50E24DCCA9E");
+  static final Guid chrSlotStatus   = Guid("6E40000A-B5A3-F393-E0A9-E50E24DCCA9E");
 
   static final Guid svcDiag      = Guid("6E400010-B5A3-F393-E0A9-E50E24DCCA9E");
   static final Guid chrState     = Guid("6E400011-B5A3-F393-E0A9-E50E24DCCA9E");
@@ -71,6 +72,12 @@ class EyeBle extends ChangeNotifier {
   int slaveTotalChunks      = 0;
   int slaveReRequestRound   = 0;
   StreamSubscription<List<int>>? _subSlaveReceipt;
+  // Slot-Bitmap (Bit n = Slot n hat ein Bild auf dem Master in LittleFS).
+  // Wird bei jedem Connect aus CHR_SLOT_STATUS gelesen, anschliessend per Notify
+  // gepflegt. Damit kennt die App nach Reinstall die Slot-Belegung auch ohne
+  // lokale SharedPreferences-Metadata.
+  int slotOccupiedMask      = 0;
+  StreamSubscription<List<int>>? _subSlotStatus;
 
   StreamSubscription<List<int>>? _subEyeId;
   StreamSubscription<List<int>>? _subState;
@@ -114,6 +121,7 @@ class EyeBle extends ChangeNotifier {
     await _subLoss?.cancel();
     await _subSilence?.cancel();
     await _subSlaveReceipt?.cancel();
+    await _subSlotStatus?.cancel();
     await _subConn?.cancel();
     _chars.clear();
     try { await device?.disconnect(); } catch (_) {}
@@ -149,6 +157,8 @@ class EyeBle extends ChangeNotifier {
     if (rcp != null && rcp.length >= 6) {
       _parseReceipt(rcp);
     }
+    final slotMask = await _readByte(EyeUuids.chrSlotStatus);
+    if (slotMask != null) slotOccupiedMask = slotMask;
   }
 
   void _parseReceipt(List<int> v) {
@@ -195,6 +205,13 @@ class EyeBle extends ChangeNotifier {
       await crcp.setNotifyValue(true);
       _subSlaveReceipt = crcp.lastValueStream.listen((v) {
         if (v.length >= 6) { _parseReceipt(v); notifyListeners(); }
+      });
+    }
+    final css = _chars[EyeUuids.chrSlotStatus];
+    if (css != null) {
+      await css.setNotifyValue(true);
+      _subSlotStatus = css.lastValueStream.listen((v) {
+        if (v.isNotEmpty) { slotOccupiedMask = v[0]; notifyListeners(); }
       });
     }
   }

@@ -82,8 +82,11 @@ class _CloudEyesScreenState extends State<CloudEyesScreen> {
   /// Zeigt einen Status-Dialog mit Countdown waehrend Master->Slave forwarded,
   /// disconnected die App fuer Coex-Schutz, reconnected dann fuer Receipt-Read.
   Future<void> _showSlaveForwardDialog(String eyeName, int slot) async {
-    // App disconnecten - Master forwarded jetzt ohne BLE-Coex
-    try { await widget.ble.disconnect(); } catch (_) {}
+    // App disconnecten - Master forwarded jetzt ohne BLE-Coex.
+    // Mit Timeout: wenn disconnect haengt (Android-BT-State stuck), nicht ewig blockieren.
+    try {
+      await widget.ble.disconnect().timeout(const Duration(seconds: 5));
+    } catch (_) {}
 
     if (!mounted) return;
     // Non-dismissable Dialog mit Countdown
@@ -97,10 +100,9 @@ class _CloudEyesScreenState extends State<CloudEyesScreen> {
     if (result != null) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(result)));
     }
-    // Dialog ist nach showDialog() automatisch geschlossen - kein weiteres pop noetig.
-    // Vorher hat ein popUntil((r) => r.isFirst) HomeScreen vom Stack genommen und
-    // User zu DiscoveryScreen zurueck-geworfen, was als "schwarzer Bildschirm"
-    // wahrgenommen wurde.
+    // Force-Refresh: stellt sicher dass die Screen nach Dialog-Close sauber neu rendert.
+    // Falls BLE in einem komischen Zustand ist, vermeidet das einen schwarzen Frame.
+    setState(() {});
   }
 
   Future<void> _pickSlotAndDownload(CloudEye eye) async {
@@ -223,15 +225,21 @@ class _SlaveForwardDialogState extends State<_SlaveForwardDialog> {
   String _status = 'Lade auf Slave...';
   String _detail = 'Geschaetzt ~15 Sekunden';
   bool   _done = false;
+  bool   _closed = false;          // Guard gegen doppeltes pop
   bool   _pendingReconnect = false;
   int    _reconnectAttempts = 0;
   static const int _maxReconnects = 5;
+  // Notfall-Timeout: Dialog schliesst sich nach 90s auf jeden Fall.
+  // Verhindert haengenden Dialog wenn BLE-Reconnect aus irgendeinem Grund tot bleibt.
+  static const Duration _emergencyTimeout = Duration(seconds: 90);
 
   @override
   void initState() {
     super.initState();
     // Nach 15s Auto-Reconnect-Versuch
     Future.delayed(const Duration(seconds: 15), _tryReconnect);
+    // Emergency-Close - falls alle anderen Wege fehlschlagen
+    Future.delayed(_emergencyTimeout, _emergencyClose);
     widget.ble.addListener(_onBleUpdate);
   }
 
@@ -241,8 +249,28 @@ class _SlaveForwardDialogState extends State<_SlaveForwardDialog> {
     super.dispose();
   }
 
+  /// Schliesst den Dialog genau einmal. Schuetzt vor double-pop falls mehrere
+  /// Future-Delayed gleichzeitig auf pop() abzielen.
+  void _safePop(String? result) {
+    if (_closed || !mounted) return;
+    _closed = true;
+    Navigator.of(context).pop(result);
+  }
+
+  /// Notfall-Schliesser nach 90s. Wenn _done schon true, dann tut diese
+  /// Funktion nichts (regulaerer Close laeuft schon). Sonst Force-Close.
+  void _emergencyClose() {
+    if (_closed || !mounted) return;
+    setState(() {
+      _status = 'Zeitueberschreitung';
+      _detail = 'Konnte nicht abschliessen - bitte App neu oeffnen falls noetig';
+      _done = true;
+    });
+    _safePop(null);
+  }
+
   void _onBleUpdate() {
-    if (!mounted || _done) return;   // Guard gegen Notifies nach Erfolg
+    if (!mounted || _done || _closed) return;
     // Wenn wir nach Reconnect eine Receipt sehen, Status updaten
     final unique = widget.ble.slaveUniqueReceived;
     final total  = widget.ble.slaveTotalChunks;
@@ -255,8 +283,7 @@ class _SlaveForwardDialogState extends State<_SlaveForwardDialog> {
           _done = true;
         });
         Future.delayed(const Duration(seconds: 2), () {
-          if (mounted) Navigator.of(context).pop(
-            '"${widget.eyeName}" erfolgreich uebertragen ($unique/$total Chunks)');
+          _safePop('"${widget.eyeName}" erfolgreich uebertragen ($unique/$total Chunks)');
         });
       } else {
         setState(() {
@@ -285,9 +312,7 @@ class _SlaveForwardDialogState extends State<_SlaveForwardDialog> {
         _detail = 'Bild ist wahrscheinlich auf beiden Augen, aber keine Bestaetigung';
         _done = true;
       });
-      Future.delayed(const Duration(seconds: 2), () {
-        if (mounted) Navigator.of(context).pop(null);
-      });
+      Future.delayed(const Duration(seconds: 2), () => _safePop(null));
       return;
     }
     try {
@@ -316,7 +341,7 @@ class _SlaveForwardDialogState extends State<_SlaveForwardDialog> {
       actions: [
         if (!_done)
           TextButton(
-            onPressed: () => Navigator.of(context).pop('Abgebrochen — Bild wird trotzdem fertig uebertragen'),
+            onPressed: () => _safePop('Abgebrochen — Bild wird trotzdem fertig uebertragen'),
             child: const Text('Abbrechen'),
           ),
       ],

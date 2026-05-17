@@ -148,6 +148,9 @@ class _EyeGrid extends StatelessWidget {
         final isCloud  = i >= kHardcodedEyeCount;
         final cloudSlot = isCloud ? (i - kHardcodedEyeCount) : -1;
         final meta = isCloud ? slotMeta[cloudSlot] : null;
+        // Master meldet via CHR_SLOT_STATUS welche Slots auf der LittleFS belegt sind.
+        // Wichtig nach Reinstall: lokale Metadaten weg, aber Master hat die Bilder noch.
+        final occupied = isCloud && (ble.slotOccupiedMask & (1 << cloudSlot)) != 0;
         final selected = i == ble.eyeId;
         return Material(
           color: selected
@@ -179,14 +182,19 @@ class _EyeGrid extends StatelessWidget {
                                   child: Column(
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
-                                      Icon(Icons.cloud,
+                                      Icon(
+                                          occupied ? Icons.cloud_done : Icons.cloud_outlined,
                                           size: 32,
-                                          color: Theme.of(context).colorScheme.outline),
+                                          color: occupied
+                                              ? Theme.of(context).colorScheme.primary
+                                              : Theme.of(context).colorScheme.outline),
                                       const SizedBox(height: 4),
-                                      Text('leer',
+                                      Text(occupied ? 'belegt' : 'leer',
                                           style: TextStyle(
                                               fontSize: 11,
-                                              color: Theme.of(context).colorScheme.outline)),
+                                              color: occupied
+                                                  ? Theme.of(context).colorScheme.primary
+                                                  : Theme.of(context).colorScheme.outline)),
                                     ],
                                   ),
                                 ))
