@@ -34,6 +34,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
             },
           ),
         ),
+        const SizedBox(height: 32),
+        const Center(
+          child: Text(
+            'Created by Thomas Paul for Schafberg-Pass Sankt Gilgen',
+            style: TextStyle(
+              fontSize: 11,
+              color: Colors.grey,
+              fontStyle: FontStyle.italic,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ),
       ],
     );
   }
