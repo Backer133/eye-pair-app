@@ -16,6 +16,8 @@ class _HomeScreenState extends State<HomeScreen> {
   int _tab = 0;
   // Slot-Metadata Cache: [slot_idx] -> SlotMeta? (null = leer)
   final List<SlotMeta?> _slotMeta = List<SlotMeta?>.filled(kCloudSlotCount, null);
+  // Recovery vom Master nach App-Reinstall: nur einmal pro Connect.
+  bool _metaRecoveryDone = false;
 
   @override
   void initState() {
@@ -40,6 +42,24 @@ class _HomeScreenState extends State<HomeScreen> {
     final pid = widget.ble.pairId;
     for (int s = 0; s < kCloudSlotCount; s++) {
       _slotMeta[s] = await SlotMetadataStore.get(pid, s);
+    }
+    // Recovery vom Master: nur einmal pro Connect, nur wenn BLE verbunden und
+    // Master mind. einen Slot als belegt meldet. Vermeidet parallele BLE-Reads
+    // wenn _onBleUpdate mehrfach in Folge feuert.
+    if (!_metaRecoveryDone &&
+        widget.ble.connected &&
+        widget.ble.slotOccupiedMask != 0) {
+      _metaRecoveryDone = true;
+      for (int s = 0; s < kCloudSlotCount; s++) {
+        if (_slotMeta[s] == null &&
+            (widget.ble.slotOccupiedMask & (1 << s)) != 0) {
+          final esp = await widget.ble.getSlotMeta(s);
+          if (esp != null) {
+            await SlotMetadataStore.set(pid, s, esp.name, esp.url);
+            _slotMeta[s] = SlotMeta(esp.name, esp.url);
+          }
+        }
+      }
     }
     if (mounted) setState(() {});
   }
